@@ -79,3 +79,119 @@ FILE *dofopen(const char *path, const char *mode)
 	}
 	return fp;
 } // dofopen()
+
+int filexists(const char *path, off_t *fsize)
+{	// returns 0 if, -1 otherwise.
+	struct stat sb;
+	int res;
+
+	res = stat(path, &sb);
+	if (res == -1) return -1;
+	/* This will return true only if path looks at a regular file
+	 * or a symlink pointing to one such.
+	*/
+	if (S_ISREG(sb.st_mode)) {
+		// if symlink then mode is that of the target
+		*fsize = sb.st_size;
+		return 0;
+	}
+	return -1;
+} // filexists()
+
+int direxists(const char *path)
+{	// return 0 if so, -1 otherwise.
+	struct stat sb;
+
+	if (stat(path, &sb) == -1) return -1;
+	/* This will return true only if path looks at a dir.
+	*/
+	if (S_ISDIR(sb.st_mode)) {
+		return 0;
+	}
+	return -1;
+} // direxists()
+
+void dorename(char *oldname, char *newname)
+{	// just rename() with error handling.
+	if (rename(oldname, newname) == -1) {
+		perror(newname);
+		exit(EXIT_FAILURE);
+	}
+} // dorename()
+
+void writefile(const char *fname, char *fro, const char *to)
+{	// invokes fwrite()
+	/* TODO: Consider that I should bring mode into this, w|a so I can
+	 * append as well as write, or whether I have appendfile()
+	 * function instead.
+	* */
+	FILE *fpo;
+	size_t siz, result;
+
+	siz = to - fro;
+	if (strcmp(fname, "-") == 0) {
+		/* I have had some impossibility writing to stdout after
+		 * redirecting it using freopen(). I worked around that by
+		 * explicitly opening a named file to take some output.
+		 * I should just use fwrite() on this also.
+		*/
+		char *cp = fro;
+		while (cp < to) {
+			putchar(*cp);
+			cp++;
+		}
+	} else {
+		fpo = dofopen(fname, "w");
+		result = fwrite(fro, 1, siz, fpo);
+		if (result != siz) {
+			fprintf(stderr, "Size discrepancy in fwrite: %s %zu, %zu",
+				fname, siz, result);
+			perror(fname);	// might produce something useful.
+			exit(EXIT_FAILURE);
+		}
+	fclose(fpo);
+	}
+} // writefile()
+
+
+FILE *dofreopen(const char *path, const char *mode, FILE *fp)
+{	// just freopen() with error handling.
+	FILE *fpo = freopen(path, mode, fp);
+	if(!(fp)){
+		perror(path);
+		exit(EXIT_FAILURE);
+	}
+	return fpo;
+} // dofreopen()
+
+void dounlink(const char *fname)
+{
+	if (unlink(fname) == -1) {
+		perror(fname);
+		exit(EXIT_FAILURE);
+	}
+} // dounlink()
+
+void mem2str(char *fr, char *to, int *lcount)
+{	// replace all '\n' with '\0' and count the replacements.
+	int lc;
+	char *cp;
+
+	cp = fr;
+	lc = 0;
+	while (cp < to) {
+		if (*cp == '\n') {
+			*cp = '\0';
+			lc++;
+		}
+		cp++;
+	}
+	*lcount = lc;
+} // mem2str()
+
+void cpfile(const char *fr, const char *to)
+{
+	struct fdata frdat = readfile(fr, 0, 1);
+	writefile(to, frdat.from, frdat.to);
+	free(frdat.from);
+}
