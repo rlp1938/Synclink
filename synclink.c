@@ -18,7 +18,6 @@
  *	MA 02110-1301, USA.
 */
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,7 +40,6 @@ static void dorealpath(char *givenpath, char *resolvedpath);
 static void dosystem(const char *cmd);
 static void dohelp(int forced);
 static void dosetlang(void);
-static void mem_to_strlist(char *from, char *to);
 static void pass1(struct fdata srcfdat, struct fdata dstfdat,
 					FILE *fpo);
 static void lineparts(char *origin, char *root, char *fsobject,
@@ -50,7 +48,7 @@ static void addobject(char *dstroot, char *srcpath, char *srcptr,
 						int objtyp);
 static void inocheck(char *srcline, char *dstline, int objtyp);
 static void twoparts(char *line, char *path, int *fsobj);
-static void pass2(struct fdata delfdat);
+static void pass2(struct fdata delfdat, char acton);
 static void reporterror(const char *module, const char *perrorstr,
 							int fatal);
 
@@ -176,8 +174,9 @@ int main(int argc, char **argv)
 	dstfdat = readfile(fnv[3], 0, 1);
 
 	// convert file data blocks to C strings
-	mem_to_strlist(srcfdat.from, srcfdat.to);
-	mem_to_strlist(dstfdat.from, dstfdat.to);
+	int dummy;
+	mem2str(srcfdat.from, srcfdat.to, &dummy);
+	mem2str(dstfdat.from, dstfdat.to, &dummy);
 
 	// process the file path lists
 	fpo = dofopen(fnv[4], "w");	// candidates for deletion.
@@ -192,10 +191,21 @@ int main(int argc, char **argv)
 	free(srcfdat.from);
 
 	// deal with the deletions
+
+	/* Necessary change:
+	 * Because any char except '/' can be used in a filename, it is
+	 * forever impossible to create a pathend string that will not
+	 * fubar on some system because a dir is to be deleted before it's
+	 * contained file. So, I will do 2 passes over the existing list,
+	 * the first deleting only file/symlink objects, and the second
+	 * removing the empty dirs.
+	*/
+
 	delfdat = readfile(fnv[5], 0, 1);
-	mem_to_strlist(delfdat.from, delfdat.to);
+	mem2str(delfdat.from, delfdat.to, &dummy);
 	if (verbose) fprintf(stdout, "Pass2\n");
-	pass2(delfdat);
+	pass2(delfdat, ' ');	// only files and symlinks.
+	pass2(delfdat, 'd');	// only dirs.
 	free(delfdat.from);
 
 	// trash workfiles
@@ -251,8 +261,11 @@ void recursedir(char *headdir, FILE *fpo)
 			strcpy(newpath, headdir);
 			strcat(newpath, de->d_name);
 			// symlinks are simply recorded, broken?? I don't care here.
-			if (de->d_type == DT_LNK) ftyp = 's';
-			if (de->d_type == DT_REG) ftyp = 'f';
+			if (de->d_type == DT_LNK){
+				ftyp = 's';
+			} else if (de->d_type == DT_REG){
+				ftyp = 'f';
+			} else ftyp = 0;	// stops gcc warning.
 			// now just record the thing
 			fprintf(fpo, "%s%s %c\n", newpath, pathend, ftyp);
 			break;
@@ -353,17 +366,6 @@ void dosetlang(void)
 		reporterror("dosetlang(): ", "setenv(LC_ALL, C)", 1);
 	}
 } // dosetlang()
-
-void mem_to_strlist(char *from, char *to)
-{	// replace all '\n' with '\0'
-	char *cp;
-
-	cp = from;
-	while((cp = memchr(cp, '\n', to - cp))) {
-		*cp = '\0';
-		cp++;
-	}
-} // mem_to_strlist()
 
 void pass1(struct fdata srcfdat, struct fdata dstfdat, FILE *fpo)
 {
@@ -536,6 +538,7 @@ void inocheck(char *srcpath, char *dstpath, int objtyp)
 	// destination path and then link it from source.
 	struct stat sb;
 	ino_t srcino, dstino;
+	srcino = dstino = 0;
 
 	switch (objtyp) {
 		case 'f':
@@ -568,13 +571,17 @@ void inocheck(char *srcpath, char *dstpath, int objtyp)
 		exit(EXIT_FAILURE);
 		break;
 	}
-	if (srcino != dstino) {
-		if (unlink(dstpath) == -1) {
-			reporterror("Failure, inocheck()/unlink(): ", dstpath, 0);
-		}
-		sync();	// TODO - try removing this and see if the link() fails.
-		if (link(srcpath, dstpath) == -1) {
-			reporterror("Failure, inocheck()/link(): ", srcpath, 0);
+	if (srcino && dstino) {
+		if (srcino != dstino) {
+			if (unlink(dstpath) == -1) {
+				reporterror("Failure, inocheck()/unlink(): ",
+							dstpath, 0);
+			}
+			sync();	/* TODO,try removing this and see if the link()
+					fails. */
+			if (link(srcpath, dstpath) == -1) {
+				reporterror("Failure, inocheck()/link(): ", srcpath, 0);
+			}
 		}
 	}
 } // inocheck()
@@ -599,7 +606,7 @@ void twoparts(char *line, char *path, int *fsobj)
 	*fsobj = fsot;
 } // twoparts()
 
-void pass2(struct fdata delfdat)
+void pass2(struct fdata delfdat, char acton)
 {
 	// data is sorted in reverse ascii order so file objects will be
 	// presented before their containing dirs.
@@ -612,13 +619,14 @@ void pass2(struct fdata delfdat)
 		twoparts(line, delpath, &objtyp);
 		switch (objtyp) {
 			case 'd':
-			sync();	// TODO: try it without sync()
+			if (acton != 'd') break;
 			if (rmdir(delpath) == -1) {
 				reporterror("Failure, pass2()/rmdir(): ", delpath, 0);
 			}
 			break;
 			case 'f':
 			case 's':
+			if (acton == 'd') break;
 			if (unlink(delpath) == -1) {
 				reporterror("Failure, pass2()/unlink(): ", delpath, 0);
 			}
