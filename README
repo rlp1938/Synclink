@@ -1,0 +1,13 @@
+README for synclink.
+Syncronises the contenst of souce dir with that of destination dir.
+1. Creates dirs in destination that match those in source if they don't
+exist.
+2. Checks corresponding file and symlinks in both source and destination
+that they have the same inode number. If not the destination object is
+deleted and then a hard link to the source object is created.
+3. Deletes all file system objects that exist in destination that do not
+exist in source.
+4. Considers only files, dirs and symlinks. All other file system
+objects are ignored.
+
+See INSTALLATION for building instructions.
