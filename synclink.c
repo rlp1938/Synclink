@@ -30,16 +30,12 @@
 #include <libgen.h>
 
 #include "fileutil.h"
+#include "runutils.h"
 
 static void recursedir(char *headdir, FILE *fpo);
 static char **makefilenamelist(char *prefix, char **argv, int numberof);
 static void destroyfilenamelist(char **filenamev);
-static void *domalloc(size_t sz);
-static char *dostrdup(const char *s);
-static void dorealpath(char *givenpath, char *resolvedpath);
-static void dosystem(const char *cmd);
 static void dohelp(int forced);
-static void dosetlang(void);
 static void pass1(struct fdata srcfdat, struct fdata dstfdat,
 					FILE *fpo);
 static void lineparts(char *origin, char *root, char *fsobject,
@@ -49,9 +45,6 @@ static void addobject(char *dstroot, char *srcpath, char *srcptr,
 static void inocheck(char *srcline, char *dstline, int objtyp);
 static void twoparts(char *line, char *path, int *fsobj);
 static void pass2(struct fdata delfdat, char acton);
-static void reporterror(const char *module, const char *perrorstr,
-							int fatal);
-
 static const char *pathend = "   !";	// Maybe no one is stupid
 										// enough to use any of these
 										// (int)32X3+! in a file name.
@@ -313,59 +306,6 @@ void destroyfilenamelist(char **filenamev)
 	}
 	free(filenamev);
 } // destroyfilenamelist()
-
-static void *domalloc(size_t sz)
-{
-	// malloc() with error handling
-	void *result = malloc(sz);
-	if (!result) {
-		reporterror("domalloc(): ", "malloc", 1);
-	}
-	return result;
-} // domalloc()
-
-char *dostrdup(const char *s)
-{	// strdup() with error handling
-	char *dst = strdup(s);
-	if(!dst) {
-		reporterror("dostrdup(): ", "strdup", 1);
-	}
-	return dst;
-} // dostrdup()
-
-void dorealpath(char *givenpath, char *resolvedpath)
-{	// realpath() witherror handling.
-	if(!(realpath(givenpath, resolvedpath))) {
-		reporterror("dorealpath(): ", givenpath, 1);
-	}
-} // dorealpath()
-
-void dosystem(const char *cmd)
-{
-    const int status = system(cmd);
-
-    if (status == -1) {
-        fprintf(stderr, "System to execute: %s\n", cmd);
-        exit(EXIT_FAILURE);
-    }
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-        fprintf(stderr, "%s failed with non-zero exit\n", cmd);
-        exit(EXIT_FAILURE);
-    }
-
-    return;
-} // dosystem()
-
-void dosetlang(void)
-{
-	// setenv() constant values with error handling.
-	// Must use LC_ALL to stop sort producing garbage.
-
-	if (setenv("LC_ALL", "C", 1) == -1) {
-		reporterror("dosetlang(): ", "setenv(LC_ALL, C)", 1);
-	}
-} // dosetlang()
 
 void pass1(struct fdata srcfdat, struct fdata dstfdat, FILE *fpo)
 {
@@ -639,10 +579,3 @@ void pass2(struct fdata delfdat, char acton)
 		line += strlen(line) + 1;
 	}
 } // pass2()
-
-void reporterror(const char *module, const char *perrorstr,	int fatal)
-{	// enhanced error reporting.
-	fputs(module, stderr);
-	perror(perrorstr);
-	if(fatal) exit(EXIT_FAILURE);
-} // reporterror()
