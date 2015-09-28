@@ -14,11 +14,12 @@
 #include <libgen.h>
 
 
-struct fdata {
+typedef struct fdata {
 	char *from;
 	char *to;
-};
-struct fdata readfile(const char *filename, off_t extra, int fatal);
+} fdata;
+
+fdata readfile(const char *filename, off_t extra, int fatal);
 FILE *dofopen(const char *path, const char *mode);
 FILE *dofreopen(const char *path, const char *mode, FILE *fp);
 int filexists(const char *path, off_t *fsize);

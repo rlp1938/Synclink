@@ -1,4 +1,4 @@
-.TH "SYNCLINK" 1 "2015-02-03" "GNU command"
+.TH "SYNCLINK" 1 "2015-04-14" "GNU command"
 
 
 .SH NAME
@@ -10,14 +10,24 @@
 
 .P
 \fBsynclink\fR [option] source_dir destination_dir.
-Both directories must be input by the user.
+
+.P
+\fBsynclink\fR [option] source_list destination_dir.
+
+.P
+Either both directories must be input by the user, or a list of files
+followed by a destination dir.
 
 .SH DESCRIPTION
 
 .P
 \fBsynclink\fR causes the destination directory to be an exact hard linked
-copy of the source directory. Files which are copies rather than links will be deleted and replaced by a linked version. Directories required in the destination are created as necessary. Symlinks are linked as are files regardless of being broken or not. All file system objects in the destination but not in the source are deleted.
+copy of the source. Files which are copies rather than links will be deleted and replaced by a linked version. Directories required in the destination are created as necessary. Symlinks are linked as are files regardless of being broken or not. All file system objects in the destination but not in the source are deleted.
+
+.P
 Some errors are fatal but some file and dir handling errors are not. These errors are sent to \fIstderr\fR. It may be usefull to redirect such errors to a file. Eg: 2> errors.lst.
+
+.P
 File system objects other than directories, regular files and symlinks are ignored.
 
 .SH OPTIONS

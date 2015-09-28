@@ -45,13 +45,16 @@ static void addobject(char *dstroot, char *srcpath, char *srcptr,
 static void inocheck(char *srcline, char *dstline, int objtyp);
 static void twoparts(char *line, char *path, int *fsobj);
 static void pass2(struct fdata delfdat, char acton);
+static void filelist2dirlist(const char *list, const char *dirlist);
+
 static const char *pathend = "   !";	// Maybe no one is stupid
 										// enough to use any of these
 										// (int)32X3+! in a file name.
-static int verbose;
+static int verbose, delwork;
 
 static const char *helpmsg =
-  "\n\tUsage: synclink [option] srcdir dstdir\n"
+  "\n\tUsage:\tsynclink [option] srcdir dstdir\n"
+  "\t\tsynclink [option] srclist dstdir"
   "\n\tOptions:\n"
   "\t-h outputs this help message.\n"
   "\t-D Debug mode, don't delete workfiles in /tmp on completion.\n"
@@ -68,12 +71,13 @@ struct lp {
 
 int main(int argc, char **argv)
 {
-	int opt, delwork;
-	char srcdir[PATH_MAX], dstdir[PATH_MAX], command[PATH_MAX];
+	int opt;
+	char srcobj[PATH_MAX], dstdir[PATH_MAX], command[PATH_MAX];
 	struct stat sb;
 	char **fnv;
 	FILE *fpo;
 	struct fdata srcfdat, dstfdat, delfdat;
+	int have_src_dir;
 
 	// set defaults
 	delwork = 0;	// TODO: default to be 1 when this is debugged.
@@ -104,21 +108,25 @@ int main(int argc, char **argv)
 
 	// 1.Check that argv[???] exists.
 	if (!(argv[optind])) {
-		fprintf(stderr, "No source dir provided\n");
+		fprintf(stderr, "No source dir or file provided\n");
 		dohelp(1);
 	} else {
-		dorealpath(argv[optind], srcdir);
+		dorealpath(argv[optind], srcobj);
 	}
 
 	// 2. Check that dir exists.
-	if (stat(srcdir, &sb) == -1) {
-		perror(srcdir);
+	if (stat(srcobj, &sb) == -1) {
+		perror(srcobj);
 		dohelp(EXIT_FAILURE);	// no return from dohelp()
 	}
 
-	// 3. Ensure that this is a dir
-	if (!S_ISDIR(sb.st_mode)) {
-		fprintf(stderr, "%s is not a direcory.\n", srcdir);
+	// 3. Ensure that this is a dir or file
+	if (S_ISDIR(sb.st_mode)) {
+		have_src_dir = 1;
+	} else if (S_ISREG(sb.st_mode)) {
+		have_src_dir = 0;
+	} else {
+		fprintf(stderr, "%s is neither a direcory or file.\n", srcobj);
 		dohelp(EXIT_FAILURE);	// no return from dohelp()
 	}
 
@@ -133,27 +141,33 @@ int main(int argc, char **argv)
 		dorealpath(argv[optind], dstdir);
 	}
 
-	// 5. Check that dir exists.
+	// 5. Check that the FS object exists.
 	if (stat(dstdir, &sb) == -1) {
 		perror(dstdir);
 		dohelp(EXIT_FAILURE);	// no return from dohelp()
 	}
 
-	// 6. Ensure that this is a dir
-	if (!S_ISDIR(sb.st_mode)) {
+	// 6. Ensure that this is a dir.
+	if (S_ISDIR(sb.st_mode)) {
 		fprintf(stderr, "%s is not a direcory.\n", dstdir);
 		dohelp(EXIT_FAILURE);	// no return from dohelp()
 	}
 
 	fnv = makefilenamelist("/tmp/", argv, 6);	// workfiles in /tmp/
 
-	// process source dir
-	fpo = dofopen(fnv[0], "w");
-	recursedir(srcdir, fpo);
-	fclose(fpo);
 	dosetlang();	// $LANG to be "C", so sort works in ascii order.
-	sprintf(command, "sort %s > %s", fnv[0], fnv[1]);
+
+	if (have_src_dir) {
+	// process source dir
+		fpo = dofopen(fnv[0], "w");
+		recursedir(srcobj, fpo);
+		fclose(fpo);
+	} else {
+
+	}
+	sprintf(command, "sort -u %s > %s", fnv[0], fnv[1]);
 	dosystem(command);
+
 
 	// process destination dir
 	fpo = dofopen(fnv[2], "w");
@@ -579,3 +593,41 @@ void pass2(struct fdata delfdat, char acton)
 		line += strlen(line) + 1;
 	}
 } // pass2()
+
+void filelist2dirlist(const char *list, const char *dirlist)
+{
+	/*
+	 * The list of files may have been produced by something like:
+	 * find Documents/Ebooks -name '*.epub' > files.lst
+	 * Consequently it will not have directory entries and may have
+	 * relative paths.
+	 * So do a real path on every line if needed and write the dir for
+	 * every item. This will generate many redundant dir lines. So a
+	 * sort with -u option will be required on completion.
+	*/
+	fdata fdat = readfile(list, 0, 1);
+	char *cp = fdat.from;
+
+	// turn the mess into C strings
+	while(cp < fdat.to) {
+		if (*cp == '\n') *cp = '\0';
+		cp++;
+	}
+
+	FILE *fpo = dofopen(dirlist, "w");
+	char out[PATH_MAX], thedir[PATH_MAX];
+	cp = fdat.from;
+	while (cp < fdat.to) {
+		if (*cp != '/') {
+			realpath(cp, out);
+		} else {
+			strcpy(out, cp);
+		}
+		strcpy(thedir, dirname(out));
+		strcat(thedir, "/");
+		fprintf(fpo, "%s\n", thedir);
+		fprintf(fpo, "%s\n", out);
+		cp += strlen(cp) + 1;	// next data line
+	}
+	fclose(fpo);
+} // filelist2dirlist()
