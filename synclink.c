@@ -59,13 +59,12 @@ static char *srcroot, *dstroot;
 static mode_t dirmode;
 static const char *helpmsg =
   "\n\tUsage:\tsynclink [option] srcdir dstdir\n"
-  "\t\tsynclink [option] srclist dstdir"
   "\n\tOptions:\n"
   "\t-h outputs this help message.\n"
   "\t-D Debug mode, don't delete workfiles in /tmp on completion.\n"
   "\t   Workfile names are /tmp/username+argv[0]+0..6.\n"
-  "\t-v Set verbose on. Only 1 level of verbosity and it goes to"
-  " stdout.\n"
+  "\t-v Set verbose on. Only 2 level of verbosity and it goes to"
+  " stderr.\n"
   ;
 
 struct lp {
