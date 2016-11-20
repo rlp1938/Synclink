@@ -19,7 +19,7 @@
 */
 
 #include "runutils.h"
-
+#include <unistd.h>
 
 void firstrun(char *frtext, char *srcdir, char *dstdir, ...)
 {	/* Display frtext, then for as many srcfiles exist, copy them from
@@ -179,8 +179,42 @@ void *domalloc(size_t sz)
 } // domalloc()
 
 void dorealpath(char *givenpath, char *resolvedpath)
-{	// realpath() witherror handling.
-	if(!(realpath(givenpath, resolvedpath))) {
-		reporterror("dorealpath(): ", givenpath, 1);
+{	/* Some lunatic has fucked up get_current_dir_name() which I need
+	 * to deal with givenpath that has shell short cuts like '.' '..'
+	 * etc, so I'll just roll my own realpath().
+	* */
+	if (givenpath[0] == '/') { // a realpath has been given.
+		strcpy(resolvedpath, givenpath);
+		return;
 	}
+	char *cwd = getenv("PWD");
+	char *buf = domalloc(strlen(givenpath) + strlen(cwd) + 2);
+	strcpy(buf, cwd);
+	size_t l = strlen(buf);
+	if (buf[l-1] != '/') strcat(buf, "/");
+	if (strcmp(givenpath, ".") == 0) {
+		strcpy(resolvedpath, buf);
+		free(buf);
+		return;
+	}
+	/* Deal with abberations like ../../ etc*/
+	if (strncmp("..", givenpath, 2) == 0) {
+		buf[l-1] = 0;	// get rid of final '/'
+		char *cp = givenpath;
+		while (strncmp("..", cp, 2) == 0) {
+			char *ep = strrchr(buf, '/');
+			if (*ep) *ep = 0; else break;
+			cp += 2;
+			if (*cp == '/') cp++;
+		}
+		strcat(buf, "/");
+		if(strlen(cp)) strcat(buf, cp);
+	} else if (strncmp("./", givenpath, 2) == 0) {
+		char *cp = givenpath + 2;
+		if (strlen(cp)) strcat(buf, cp);
+	} else {
+		strcat(buf, givenpath);
+	}
+	strcpy(resolvedpath, buf);
+	free(buf);
 } // dorealpath()
