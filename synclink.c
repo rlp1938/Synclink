@@ -82,7 +82,7 @@ int main(int argc, char **argv)
 	struct fdata srcfdat, dstfdat;
 
 	// set defaults
-	delwork = 0;	// TODO: default to be 1 when this is debugged.
+	delwork = 1;
 	verbose = 0;
 
 	while((opt = getopt(argc, argv, ":hDv")) != -1) {
@@ -95,6 +95,7 @@ int main(int argc, char **argv)
 		break;
 		case 'v': // Make verbose.
 		verbose++;	// I will only process 3 levels of verbosity, 0 - 2
+		if (verbose > 2) verbose = 2;
 		break;
 		case ':':
 			fprintf(stderr, "Option %c requires an argument\n",optopt);
@@ -152,7 +153,7 @@ int main(int argc, char **argv)
 	}
 	dstroot = strdup(dstdir);
 
-	fnv = makefilenamelist("/tmp/", argv, 6);	// workfiles in /tmp/
+	fnv = makefilenamelist("/tmp/", argv, 4);	// workfiles in /tmp/
 
 	dosetlang();	// $LANG to be "C", so sort works in ascii order.
 
@@ -277,7 +278,8 @@ char **makefilenamelist(char *prefix, char **argv, int numberof)
 	username = getenv("USER");
 	progname = basename(argv[0]);
 	for(i=0; i<numberof; i++) {
-		sprintf(fn, "%s%s%s%d", prefix, username, progname, i);
+		sprintf(fn, "%s%s%d%s%d", prefix, username, getpid(), progname,
+				i);
 		fnlist[i] = dostrdup(fn);
 	}
 	fnlist[numberof] = (char *)NULL;
