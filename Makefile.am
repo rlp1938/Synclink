@@ -3,7 +3,7 @@
 AM_CFLAGS=-Wall -Wextra -O0 -D_GNU_SOURCE=1
 
 bin_PROGRAMS=synclink
-synclink_SOURCES=synclink.c fileutil.c fileutil.h runutils.c runutils.h
+synclink_SOURCES=synclink.c fileops.c fileops.h stringops.c stringops.h
 
 man_MANS=synclink.1
 EXTRA_BUILD=synclink.1

@@ -29,8 +29,7 @@
 #include <limits.h>
 #include <libgen.h>
 
-#include "fileutil.h"
-#include "runutils.h"
+#include "fileops.h"
 
 typedef struct fsdata {
 	int exists;	// 0 = no, 1 = yes
@@ -39,33 +38,12 @@ typedef struct fsdata {
 	mode_t omode;	// not used often, defaults to 0.
 } fsdata;
 
-static void recursedir(char *headdir, FILE *fpo);
-static char **makefilenamelist(char *prefix, char **argv, int numberof);
-static void destroyfilenamelist(char **filenamev);
-static void dohelp(int forced);
-static void checkdstdirs(struct fdata srcfdat, struct fdata dstfdat);
-static void checkdstfiles(struct fdata srcfdat, struct fdata dstfdat);
-static void checksrcfiles(struct fdata dstfdat, struct fdata srcfdat);
-static void checksrcdirs(struct fdata dstfdat, struct fdata srcfdat);
-static fsdata fswhatisit(const char *pathname);
-static void domkdir(const char *path, mode_t crmode);
-static void checkfilestatus(const char *srcfile, const char *dstfile);
-static void myunlink(const char *path);
-static void makelink(const char *src, const char *dst);
-static void dormdir(const char *path);
-
-static int verbose, delwork;
-static char *srcroot, *dstroot;
-static mode_t dirmode;
-static const char *helpmsg =
-  "\n\tUsage:\tsynclink [option] srcdir dstdir\n"
-  "\n\tOptions:\n"
-  "\t-h outputs this help message.\n"
-  "\t-D Debug mode, don't delete workfiles in /tmp on completion.\n"
-  "\t   Workfile names are /tmp/username+argv[0]+0..6.\n"
-  "\t-v Set verbose on. Only 2 level of verbosity and it goes to"
-  " stderr.\n"
-  ;
+typedef struct memdat {
+	char *from;
+	char *to;
+	char *limit;
+	size_t chunk;
+} memdat;
 
 struct lp {
 	char pt1[PATH_MAX];
@@ -73,16 +51,41 @@ struct lp {
 	int ot;
 };
 
+static void recursedir(char *headdir, memdat *md);
+static void dohelp(int forced);
+static void checkdstdirs(size_t srclen, memdat md, char *dsthead);
+static void checkdstfiles(size_t srclen, memdat md, char *dsthead);
+static void checksrcfiles(size_t dstlen, memdat md, char *srchead);
+static void checksrcdirs(size_t dstlen, memdat md, char *srchead);
+
+static fsdata fswhatisit(const char *pathname);
+static void myunlink(const char *path);
+static void makelink(const char *src, const char *dst);
+static void dormdir(const char *path);
+static void recordstr(char *line, memdat *md);
+static void dumpdirlist(memdat md, char *id, char *progname);
+static void pathsplit(char *buf, char **thedir, char **fil);
+static ino_t getinode(char *path);
+static int verbose, listwork;
+static char *srcroot, *dstroot;
+static mode_t dirmode;
+static const char *helpmsg =
+  "\n\tUsage:\tsynclink [option] srcdir dstdir\n"
+  "\n\tOptions:\n"
+  "\t-h outputs this help message.\n"
+  "\t-D Debug mode. List contents of source and target dirs in /tmp,\n"
+  "\t   with file names '$USERsynclink$PID[srcdir|dstdir].txt'\n"
+  "\t-v Set verbose on. Only 2 level of verbosity and it goes to"
+  " stderr.\n"
+  ;
+
 int main(int argc, char **argv)
 {
 	int opt;
-	char srcobj[PATH_MAX], dstdir[PATH_MAX], command[PATH_MAX];
-	char **fnv;
-	FILE *fpo;
-	struct fdata srcfdat, dstfdat;
+	char srcdir[PATH_MAX], dstdir[PATH_MAX];
 
 	// set defaults
-	delwork = 1;
+	listwork = 0;
 	verbose = 0;
 
 	while((opt = getopt(argc, argv, ":hDv")) != -1) {
@@ -90,8 +93,8 @@ int main(int argc, char **argv)
 		case 'h':
 			dohelp(0);
 		break;
-		case 'D': // Debug mode, keep temporary work files.
-		delwork = 0;
+		case 'D': // Debug mode, record src and dst dir lists in /tmp
+		listwork = 1;
 		break;
 		case 'v': // Make verbose.
 		verbose++;	// I will only process 3 levels of verbosity, 0 - 2
@@ -114,20 +117,20 @@ int main(int argc, char **argv)
 		fprintf(stderr, "No source dir provided\n");
 		dohelp(EXIT_FAILURE);
 	} else {
-		dorealpath(argv[optind], srcobj);
+		realpath(argv[optind], srcdir);
 	}
 
 	// 2. Check that srcdir exists
-	fsdata fsd = fswhatisit(srcobj);
+	fsdata fsd = fswhatisit(srcdir);
 	if (!fsd.exists) {
-		fprintf(stderr, "Source dir %s does not exist.\n", srcobj);
+		fprintf(stderr, "Source dir %s does not exist.\n", srcdir);
 		dohelp(EXIT_FAILURE);
 	}
 	else if (fsd.otyp != 1){
-		fprintf(stderr, "Object %s is not a dir.\n", srcobj);
+		fprintf(stderr, "Object %s is not a dir.\n", srcdir);
 		dohelp(EXIT_FAILURE);
 	}
-	srcroot = strdup(srcobj);
+	srcroot = strdup(srcdir);
 	dirmode = fsd.omode;
 
 	// Next, the dstdir argument
@@ -138,7 +141,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "No destination dir provided\n");
 		dohelp(1);
 	} else {
-		dorealpath(argv[optind], dstdir);
+		realpath(argv[optind], dstdir);
 	}
 
 	// 4. Check that the FS object exists.
@@ -153,60 +156,40 @@ int main(int argc, char **argv)
 	}
 	dstroot = strdup(dstdir);
 
-	fnv = makefilenamelist("/tmp/", argv, 4);	// workfiles in /tmp/
+	// make source dir list
+	memdat md;
+	//md.chunk = 1024 * 1024;	// 1 meg
+	md.chunk = PATH_MAX;	// 4096, force realloc() for testing.
+	md.from = docalloc(md.chunk, 1, "main()");
+	md.to = md.from;
+	md.limit = md.from + md.chunk;
 
-	dosetlang();	// $LANG to be "C", so sort works in ascii order.
+	char *progname = strdup(basename(argv[0]));
 
-	// process source dir
-	fpo = dofopen(fnv[0], "w");
-	recursedir(srcobj, fpo);
-	fclose(fpo);
-	sprintf(command, "sort -u %s > %s", fnv[0], fnv[1]);
-	dosystem(command);
+	recursedir(srcdir, &md);
+	if (listwork) dumpdirlist(md, "srcdir", progname);
 
-	// process destination dir
-	fpo = dofopen(fnv[2], "w");
-	recursedir(dstdir, fpo);
-	fclose(fpo);
-	sprintf(command, "sort %s > %s", fnv[2], fnv[3]);
-	dosystem(command);
-
-	// read the sorted files into memory
-	srcfdat = readfile(fnv[1], 0, 1);
-	dstfdat = readfile(fnv[3], 0, 1);
-
-	// convert file data blocks to C strings
-	int dummy;
-	mem2str(srcfdat.from, srcfdat.to, &dummy);
-	mem2str(dstfdat.from, dstfdat.to, &dummy);
-
-	// process the file path lists.
 	// 1. Create destination dirs as needed.
-	checkdstdirs(srcfdat, dstfdat);
+	checkdstdirs(strlen(srcroot), md, dstroot);
 
 	// 2. Create and/or check files in destination.
-	checkdstfiles(srcfdat, dstfdat);
+	checkdstfiles(strlen(srcroot), md, dstroot);
+
+	// process destination dir
+	memset(md.from, 0, md.limit - md.from);
+	md.to = md.from;
+	recursedir(dstdir, &md);
+	if (listwork) dumpdirlist(md, "dstdir", progname);
 
 	// 3. Delete files in destination that don't exist in source.
-	checksrcfiles(dstfdat, srcfdat);
+	checksrcfiles(strlen(dstroot), md, srcroot);
 
 	// 4. Delete dirs in destination that don't exist in source.
-	checksrcdirs(dstfdat, srcfdat);
+	checksrcdirs(strlen(dstroot), md, srcroot);
 
 	// free the workfile data
-	free(dstfdat.from);
-	free(srcfdat.from);
-
-	// trash workfiles
-	if (delwork) {
-		int i = 0;
-		while(fnv[i]) {
-			unlink(fnv[i]);
-			i++;
-		}
-	}
-
-	destroyfilenamelist(fnv);
+	free(md.from);
+	free(progname);
 	return 0;
 }//main()
 
@@ -216,7 +199,7 @@ void dohelp(int forced)
   exit(forced);
 }
 
-void recursedir(char *headdir, FILE *fpo)
+void recursedir(char *headdir, memdat *md)
 {
 	/* open the dir at headdir and process according to file type.
 	*/
@@ -225,12 +208,12 @@ void recursedir(char *headdir, FILE *fpo)
 
 	dirp = opendir(headdir);
 	if (!(dirp)) {
-		reporterror("recursedir(): ", headdir, 1);
+		perror("opendir");
+		exit(EXIT_FAILURE);
 	}
 
 	// put the trailing '/' if it's not there.
 	if (headdir[strlen(headdir) - 1] != '/') strcat(headdir, "/");
-	fprintf(fpo, "%s\n", headdir);
 	while((de = readdir(dirp))) {
 		if (strcmp(de->d_name, "..") == 0) continue;
 		if (strcmp(de->d_name, ".") == 0) continue;
@@ -248,12 +231,13 @@ void recursedir(char *headdir, FILE *fpo)
 			strcpy(newpath, headdir);
 			strcat(newpath, de->d_name);
 			// now just record the thing
-			fprintf(fpo, "%s\n", newpath);
+			recordstr(newpath, md);
 			break;
 			case DT_DIR:
 			strcpy(newpath, headdir);
 			strcat(newpath, de->d_name);
-			recursedir(newpath, fpo);
+			recordstr(newpath, md);
+			recursedir(newpath, md);
 			break;
 			// Just report the error but do nothing else.
 			case DT_UNKNOWN:
@@ -266,54 +250,32 @@ void recursedir(char *headdir, FILE *fpo)
 	closedir(dirp);
 } // recursedir()
 
-char **makefilenamelist(char *prefix, char **argv, int numberof)
+void checkdstdirs(size_t srclen, memdat md, char *dsthead)
 {
-	// generate a list of file names with NULL terminator
-	char fn[PATH_MAX];
-	char **fnlist;
-	int i;
-	char *username, *progname;
-
-	fnlist = domalloc((numberof + 1) * sizeof(char *));
-	username = getenv("USER");
-	progname = basename(argv[0]);
-	for(i=0; i<numberof; i++) {
-		sprintf(fn, "%s%s%d%s%d", prefix, username, getpid(), progname,
-				i);
-		fnlist[i] = dostrdup(fn);
-	}
-	fnlist[numberof] = (char *)NULL;
-	return fnlist;
-} // makefilenamelist()
-
-void destroyfilenamelist(char **filenamev)
-{
-	int i = 0;
-	while(filenamev[i]) {
-		free(filenamev[i]);
-		i++;
-	}
-	free(filenamev);
-} // destroyfilenamelist()
-
-void checkdstdirs(struct fdata srcfdat, struct fdata dstfdat)
-{
-	// traverse the lists, creating dirs in dst as required.
-	fsdata fsd;
-	char *srcline = srcfdat.from;
+	// traverse md, creating dirs in dsthead as required.
 	if (verbose) fprintf(stderr, "Checking destination dirs.\n");
 
-	while (srcline < srcfdat.to) {
-		fsd = fswhatisit(srcline);
-		if (fsd.otyp == 1) {	// it's a dir
-			size_t len = dstfdat.to - dstfdat.from;
-			char buf[PATH_MAX];
-			sprintf(buf, "%s%s", dstroot, srcline + strlen(srcroot));
-			if (!memmem(dstfdat.from, len, buf, strlen(buf))) {
-				domkdir(buf, dirmode);
+	char *line = md.from;
+	while (line < md.to) {
+		if (direxists(line) == 0) {	// it's a dir
+			char buf[PATH_MAX] = {0};
+			sprintf(buf, "%s%s", dsthead, line + srclen);
+			sync();
+			int de = direxists(buf);
+			if (verbose > 1) {
+				fprintf (stderr, "Checking dir: %s\n", buf);
+			}
+
+			if (de == -1) {	// create the dir
+				char *hd = 0;
+				char *nd = 0;
+				if (verbose) fprintf(stderr, "Creating dir: %s\n",
+										buf);
+				pathsplit(buf, &hd, &nd);
+				do_mkdir(hd, nd);
 			}
 		}
-		srcline += strlen(srcline) + 1;
+		line += strlen(line) + 1;
 	}
 } // checkdstdirs()
 
@@ -335,32 +297,22 @@ fsdata fswhatisit(const char *pathname)
 	return fsd;
 } // fswhatisit()
 
-void domkdir(const char *path, mode_t crmode)
-{	/* just mkdir with error handling */
-	if (verbose)
-		fprintf(stderr, "Making destination dir:\n\t%s.\n", path);
-	if (mkdir(path, crmode) == -1) {
-		perror("path");
-		exit(EXIT_FAILURE);
-	}
-} // domkdir()
-
-void checkdstfiles(struct fdata srcfdat, struct fdata dstfdat)
+void checkdstfiles(size_t srclen, memdat md, char *dsthead)
 {
 	// traverse the lists, checking files in dst.
-	fsdata fsd;
-	char *srcline = srcfdat.from;
+	char *srcline = md.from;
 	if (verbose) fprintf(stderr, "Checking destination files.\n");
 
-	while (srcline < srcfdat.to) {
-		fsd = fswhatisit(srcline);
-		if (fsd.otyp == 2) {	// it's a file
-			size_t len = dstfdat.to - dstfdat.from;
+	while (srcline < md.to) {
+		if (fileexists(srcline) == 0) {	// it's a file
 			char buf[PATH_MAX];
-			sprintf(buf, "%s%s", dstroot, srcline + strlen(srcroot));
-			if (memmem(dstfdat.from, len, buf, strlen(buf))) {
+			sprintf(buf, "%s%s", dsthead, srcline + srclen);
+			if (fileexists(buf) == 0) {
 				// the filename exists: copy or link?
-				checkfilestatus(srcline, buf);
+				if (getinode(srcline) != getinode(buf)) { // not a link
+					myunlink(buf);
+					makelink(srcline, buf);
+				}
 			} else { // the filename does not exist in dst.
 				makelink(srcline, buf);
 			}
@@ -369,18 +321,47 @@ void checkdstfiles(struct fdata srcfdat, struct fdata dstfdat)
 	}
 } // checkdstfiles()
 
-void checkfilestatus(const char *srcfile, const char *dstfile)
-{	/* see if the srcfile and dstfile have the same inode, if so do
-	 * nothing, but if not delete dstfile and make dstfile a hard link
-	 * to srcfile.
+void checksrcfiles(size_t dstlen, memdat md, char *srchead)
+{	/* if there are any files found in dst that don't exist in src,
+	 * delete them.
 	*/
-	if (verbose > 1) fprintf(stderr, "Checking: %s\n", dstfile);
-	fsdata fsds = fswhatisit(srcfile);
-	fsdata fsdd = fswhatisit(dstfile);
-	if (fsds.ino == fsdd.ino) return;	// nothing to do.
-	myunlink(dstfile);
-	makelink(srcfile, dstfile);
-} // checkfilestatus()
+	char *dstline = md.from;
+	if (verbose) fprintf(stderr, "Checking source files.\n");
+
+	while (dstline < md.to) {
+		if (fileexists(dstline) == 0) {	// It's a file.
+			char buf[PATH_MAX];
+			sprintf(buf, "%s%s", srchead, dstline + dstlen);
+			// Does it exist in src?
+			if (fileexists(buf) == -1) { // No such file in src.
+				// So remove it from dst.
+				myunlink(dstline);
+			}
+		}
+		dstline += strlen(dstline) + 1;
+	}
+} // checksrcfiles()
+
+void checksrcdirs(size_t dstlen, memdat md, char *srchead)
+{	/* if there are any dirs found in dst that don't exist in src,
+	 * delete them. NB checksrcfiles() must be run first so that these
+	 * dirs are empty.
+	*/
+	char *dstline = md.from;
+	if (verbose) fprintf(stderr, "Checking source dirs.\n");
+	while (dstline < md.to) {
+		if (direxists(dstline) == 0) {	// It's a dir.
+			char buf[PATH_MAX];
+			sprintf(buf, "%s%s", srchead, dstline + dstlen);
+			// Does it exist in src?
+			if (direxists(buf) == -1) {	// No such dir in src.
+				// So remove it from dst.
+				dormdir(dstline);
+			}
+		}
+		dstline += strlen(dstline) + 1;
+	}
+} // checksrcdirs()
 
 void myunlink(const char *path)
 {	/* just unlink() with error handling */
@@ -393,60 +374,12 @@ void myunlink(const char *path)
 
 void makelink(const char *src, const char *dst)
 {	/* link() with error handling */
-	if (verbose) fprintf(stderr, "Linking:\n\t%s,\n\t%s\n", src, dst);
+	if (verbose) fprintf(stderr, "Linking:\n\t%s =>\n\t%s\n", src, dst);
 	if (link(src, dst) == -1) {
 		perror(src);
 		exit(EXIT_FAILURE);
 	}
 } // makelink()
-
-void checksrcfiles(struct fdata dstfdat, struct fdata srcfdat)
-{	/* if there are any files found in dst that don't exist in src,
-	 * delete them.
-	*/
-	fsdata fsd;
-	char *dstline = dstfdat.from;
-	if (verbose) fprintf(stderr, "Checking source files.\n");
-
-	while (dstline < dstfdat.to) {
-		fsd = fswhatisit(dstline);
-		if (fsd.otyp == 2) {	// it's a file
-			size_t len = srcfdat.to - srcfdat.from;
-			char buf[PATH_MAX];
-			sprintf(buf, "%s%s", srcroot, dstline + strlen(dstroot));
-			if (!memmem(srcfdat.from, len, buf, strlen(buf))) {
-				// Filename does not exist in src?. Delete from dst.
-				myunlink(dstline);
-			}
-		}
-		dstline += strlen(dstline) + 1;
-	}
-
-} // checksrcfiles()
-
-void checksrcdirs(struct fdata dstfdat, struct fdata srcfdat)
-{	/* if there are any dirs found in dst that don't exist in src,
-	 * delete them. NB checksrcfiles() must be run first so that these
-	 * dirs are empty.
-	*/
-	fsdata fsd;
-	char *dstline = dstfdat.from;
-	if (verbose) fprintf(stderr, "Checking source dirs.\n");
-
-	while (dstline < dstfdat.to) {
-		fsd = fswhatisit(dstline);
-		if (fsd.otyp == 1) {	// it's a dir
-			size_t len = srcfdat.to - srcfdat.from;
-			char buf[PATH_MAX];
-			sprintf(buf, "%s%s", srcroot, dstline + strlen(dstroot));
-			if (!memmem(srcfdat.from, len, buf, strlen(buf))) {
-				dormdir(dstline);
-			}
-		}
-		dstline += strlen(dstline) + 1;
-	}
-
-} // checksrcdirs()
 
 void dormdir(const char *path)
 {	/* rmdir() with error handling */
@@ -456,3 +389,64 @@ void dormdir(const char *path)
 		exit(EXIT_FAILURE);
 	}
 } // dormdir()
+
+void recordstr(char *line, memdat *md)
+{	/* copy line into the blob described by md, taking care of
+	 * memory reallocations as required.
+	 * Foe safety md->chunk should be PATH_MAX minimum.
+	*/
+	size_t len = strlen(line);
+	size_t avail = md->limit - md->to;
+	size_t used = md->to - md->from;
+	if (len >= avail) {	// make more space
+		size_t current = md->limit - md->from;
+		md->from = realloc(md->from, current + md->chunk);
+		md->to = md->from + used;
+		md->limit = md->from + current + md->chunk;
+		memset(md->to, 0, md->limit - md->to);
+	}
+	strcpy(md->to, line);
+	md->to += len + 1;
+} // recordstr()
+
+void dumpdirlist(memdat md, char *id, char *progname)
+{	/* write the data described by md to a file in /tmp */
+	char name[PATH_MAX];
+	sprintf(name, "/tmp/%s%s%d%s.txt", getenv("USER"), progname,
+				getpid(), id);
+	FILE *fpo = dofopen(name, "w");
+	char *cp = md.from;
+	while (cp < md.to) {
+		fprintf(fpo, "%s\n", cp);
+		cp += strlen(cp) + 1;
+	}
+	dofclose(fpo);
+}
+
+static void pathsplit(char *buf, char **thedir, char **fil)
+{	/* If buf ends with '/' get rid of it.
+	 * 0 the last '/' and return fil = *last '/' + 1
+	 * thedir = buf.
+	*/
+	size_t len = strlen(buf);
+	if (buf[len-1] == '/') {
+		buf[len-1] = 0;
+	}
+	*thedir = *fil = NULL;
+	char *sep = strrchr(buf, '/');
+	if (sep) {
+		*sep = 0;
+		*thedir = buf;
+		*fil = sep + 1;
+	}
+} // pathsplit()
+
+ino_t getinode(char *path)
+{	/* return the inode number if the path exists, if not abort */
+	struct stat sb;
+	if (stat(path, &sb) == -1) {
+		perror(path);
+		exit(EXIT_FAILURE);
+	}
+	return sb.st_ino;
+} // getinode()
