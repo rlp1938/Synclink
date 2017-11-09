@@ -1,6 +1,6 @@
-/*
- * stringops.h
- * Copyright 2016 Bob Parker <rlp1938@gmail.com>
+/*    dirs.h
+ *
+ * Copyright 2017 Robert L (Bob) Parker rlp1938@gmail.com
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,8 +18,14 @@
  * MA 02110-1301, USA.
 */
 
-#ifndef _STRINGOPS_H
-#define _STRINGOPS_H
+/* The purpose of dirs.[h|c] is to provide a set of utility functions
+ * for manipulating directories. For other file system objects see
+ * files.[h|c].
+ * */
+
+#ifndef _DIRS_H
+#define _DIRS_H
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -35,24 +41,37 @@
 #include <linux/limits.h>
 #include <libgen.h>
 #include <errno.h>
-#include <utime.h>
-#include <time.h>
+#include "str.h"
+#include "files.h"
 
-#define _GNU_SOURCE 1
+typedef struct rd_data {
+	char **rejectlist;
+	size_t meminc;
+	unsigned char fsobj[9];
+} rd_data;
 
-#include "fileops.h"
+rd_data
+*init_recursedir(char **excludes, size_t meminc, ...);
 
-typedef struct sdata {
-	char *from;
-	char *to;
-} strdata;
+void
+free_recursedir(rd_data *rd, mdata *md);
 
+DIR
+*dopendir(const char *dirname);
 
-char *dostrdup(const char *str);
-char *getcfgvalue(const char *cfgname, char **cfglines);
-strdata getdatafromtagnames(char *fro, char *to, char *tagname);
-void trace(const char *fn, char *fmt, ...);
-int getdatatype(char *partformat);
-void trace_init(const char *fn);
+void
+doclosedir(DIR *dp);
+
+int
+recursedir(char *dirname, mdata *ddat, rd_data *rd);
+
+void
+newdir(const char *dname, int mayexist);
+
+void
+xchdir(const char *);
+
+int
+exists_dir(const char *);
 
 #endif
