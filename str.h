@@ -47,6 +47,12 @@ typedef struct mdata {
 	char *limit;
 } mdata;
 
+size_t
+lenrequired(size_t nominal_len);
+
+size_t
+countmemstr(mdata *md);
+
 char
 *mktmpfn(char *prname, char *extrafn, char *thename);
 
@@ -93,7 +99,7 @@ void
 trimspace(char *buf);
 
 void
-destroystrarray(char **str_array);
+destroystrarray(char **str_array, size_t count);
 
 char
 *cfg_pathtofile(const char *prn, const char *fn);

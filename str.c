@@ -25,6 +25,25 @@
 
 #include "str.h"
 
+size_t
+lenrequired(size_t nominal_len)
+{ /* Ensure that memory operations always have 8 bytes to spare. */
+	const size_t fudgefence = 8;
+	return nominal_len + fudgefence;
+} // lenrequired()
+
+size_t
+countmemstr(mdata *md)
+{ /* In memory block specified by md, count the number of C strings. */
+	char *cp = md->fro;
+	size_t c = 0;
+	while (cp < md->to) {
+		if (*cp == 0) c++;
+		cp++;
+	}
+	return c;
+} // countmemlines()
+
 char
 *mktmpfn(char *prname, char *extrafn, char *thename)
 {/* Make a temporary file name.
@@ -58,9 +77,12 @@ meminsert(const char *line, mdata *dd, size_t meminc)
 {	/* insert line into the data block described by dd, taking care of
 	 * necessary memory reallocation as needed.
 	*/
-	int len = strlen(line);
-	if (len > dd->limit - dd->to) {
-		memresize(dd, meminc);
+	size_t len = strlen(line);
+	size_t safelen = lenrequired(len);
+	if (safelen > (unsigned)(dd->limit - dd->to)) { // >= 0 always
+		/* Ensure that line always has room to fit. */
+		size_t needed = (meminc > safelen) ? meminc : safelen;
+		memresize(dd, needed);
 	}
 	strcpy(dd->to, line);
 	dd->to += len+1;
@@ -341,12 +363,18 @@ trimspace(char *buf)
 } // trimws()
 
 void
-destroystrarray(char **wordlist)
-{/* Frees NULL terminated list of strings. */
+destroystrarray(char **wordlist, size_t count)
+{/* Frees list of strings. If count is non-zero, frees count strings,
+  * otherwise it assumes wordlist has a NULL terminator.
+*/
 	size_t i = 0;
-	while (wordlist[i]) {
-		free(wordlist[i]);
-		i++;
+	if (count) {
+		for (i = 0; i < count; i++) free(wordlist[count]);
+	} else {
+		while (wordlist[i]) {
+			free(wordlist[i]);
+			i++;
+		}
 	}
 	free(wordlist);
 } // destroystrarray()

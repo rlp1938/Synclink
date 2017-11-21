@@ -4,7 +4,7 @@
 AC_PREREQ([2.69])
 AC_INIT([synclink], [1.2], [rlp1938@gmail.com])
 AM_INIT_AUTOMAKE
-AC_CONFIG_SRCDIR([dirs.c])
+AC_CONFIG_SRCDIR([srt.h])
 AC_CONFIG_HEADERS([config.h])
 
 # Checks for programs.

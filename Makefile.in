@@ -105,7 +105,7 @@ CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(man1dir)"
 PROGRAMS = $(bin_PROGRAMS)
 am_synclink_OBJECTS = synclink.$(OBJEXT) str.$(OBJEXT) files.$(OBJEXT) \
-	dirs.$(OBJEXT)
+	dirs.$(OBJEXT) srt.$(OBJEXT)
 synclink_OBJECTS = $(am_synclink_OBJECTS)
 synclink_LDADD = $(LDADD)
 AM_V_P = $(am__v_P_@AM_V@)
@@ -305,7 +305,9 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AM_CFLAGS = -Wall -Wextra -O0 -D_GNU_SOURCE=1
-synclink_SOURCES = synclink.c str.c str.h files.c files.h dirs.c dirs.h
+synclink_SOURCES = synclink.c str.c str.h files.c files.h dirs.c dirs.h \
+srt.h srt.c
+
 man_MANS = synclink.1
 EXTRA_BUILD = synclink.1
 all: config.h
@@ -416,6 +418,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dirs.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/files.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/srt.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/str.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/synclink.Po@am__quote@
 

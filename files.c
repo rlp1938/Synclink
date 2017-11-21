@@ -96,16 +96,21 @@ writefile(const char *filename, char *fro, char *to, const char *fmode)
 	off_t len = to - fro;
 	if (len <= 0) return;
 	FILE *fpo;
-	if (strcmp("-", filename) == 0) fpo = stdout;
+	int closeit = 1;
+	if (strcmp("-", filename) == 0) {
+		fpo = stdout;
+		closeit = 0;
+	}
 	else fpo = dofopen(filename, fmode);
 	size_t written = fwrite(fro, 1, (size_t)len, fpo);
 	if (written != (size_t)len) {
+		perror("writefile");
 		fprintf(stderr,
 				"Expected to write: %ld bytes, but wrote %lu bytes.\n",
 				len, written);
 		exit(EXIT_FAILURE);
 	}
-	dofclose(fpo);
+	if (closeit) dofclose(fpo);
 } // writefile()
 
 void

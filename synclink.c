@@ -32,6 +32,7 @@
 #include "dirs.h"
 #include "files.h"
 #include "str.h"
+#include "srt.h"
 
 typedef struct fsdata {
 	int exists;	// 0 = no, 1 = yes
@@ -135,8 +136,19 @@ int main(int argc, char **argv)
 	// 3. Delete files in destination that don't exist in source.
 	checksrcfiles(strlen(dstroot), md, srcroot);
 	// 4. Delete dirs in destination that don't exist in source.
+	// Must sort destination in reverse order so that deletions work.
+	size_t countin = countmemstr(md);
+	sortmemstr(md, 1);
+	size_t countout = countmemstr(md);
+	if (countin != countout) {
+		fprintf(stderr, "Sort failed on destination dir: %s\n", dstdir);
+		exit(EXIT_FAILURE);
+	}
+	if (listwork) {
+		char tfn[PATH_MAX];
+		dumpstrblock(mktmpfn("synclink", "revdst", tfn), md);
+	}
 	checksrcdirs(strlen(dstroot), md, srcroot);
-
 	// free the workfile data
 	free(srcdir);
 	free(dstdir);
