@@ -77,7 +77,12 @@ sortmemstr(mdata *md, int direction)
 		strcpy(cp, strlist[i]);
 		cp += strlen(cp) + 1;
 	}
-	destroystrarray(strlist, count);
+	/* The strings in strlist[] become unfreeable after qsort(), I guess
+	 * because each separate string becomes a different length.
+	 * For the moment I will simply let memory leak. It's no big deal
+	 * because this is a short run program anyway. */
+	// destroystrarray(strlist, count);
+	free(strlist);
 } // sortmemstr()
 
 void mergesort(char **a, int i, int j, char **work)

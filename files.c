@@ -24,6 +24,65 @@
  * */
 
 #include "files.h"
+
+void
+writestrarray(char **list)
+{ /* output the strings to console - must be NULL terminated. */
+	size_t i;
+	for (i = 0; list[i] ; i++)
+		printf("%s\n", list[i]);
+} // writestrarray()
+
+char
+**getfile_str(const char *path)
+{ /* Read file at path. File to have lines terminated with '\n'.
+   * Returns list of C strings with NULL terminated list.
+*/
+	mdata *md = readfile(path, 1, 0);
+	size_t n = memlinestostr(md);
+	if (!n)
+	{
+		fprintf(stderr, "File %s contains no line delimeters,\n", path);
+		exit(EXIT_FAILURE);
+	}
+	return memblocktoarray(md, 0);
+} // getfile_str()
+
+time_t
+getfile_mtime(const char *path)
+{/* get the modification time of a file if it exists.
+  * No interest in micro seconds for this purpose.
+*/
+	struct stat sb;
+	int res = lstat(path, &sb);
+	if (res == -1) return 0;	// 1970-01-01
+	return sb.st_atime;
+} // getfile_mtime()
+
+int
+xsystem(const char *cmd, int fatal)
+{ /* Runs system() and processes the results.
+   * If fatal is non zero all non zero results from the child will be
+   * fatal but there can be circumstances where the result is needed by
+   * the caller.
+*/
+	const int status = system(cmd);
+	if (status == -1) {	// this always fatal
+		fprintf(stderr, "system failed to execute: %s\n", cmd);
+		exit(EXIT_FAILURE);
+	}
+	int res = 0;
+	if (WIFEXITED(status)) {	// Child has terminated
+		res = WEXITSTATUS(status);
+		if (res) {
+			fprintf(stderr, "Command \"%s\" returned non-zero result:"
+						" %d\n" ,cmd, res);
+			if (fatal) exit(EXIT_FAILURE);
+		}
+	}
+	return res;
+} // xsystem()
+
 void
 dumpstrblock(const char *tmpfn, mdata *md)
 { /* Dumps the block of C strings named by md to the file named by
@@ -216,22 +275,6 @@ dolink(const char *fr, const char *to)
 		exit(EXIT_FAILURE);
 	}
 } // dolink()
-
-void
-xsystem(const char *cmd, int fatal)
-{
-	const int status = system(cmd);
-
-    if (status == -1) {
-        fprintf(stderr, "system failed to execute: %s\n", cmd);
-        exit(EXIT_FAILURE);
-    }
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-        fprintf(stderr, "%s failed with non-zero exit\n", cmd);
-        if (fatal) exit(EXIT_FAILURE);
-    } // unsure what some stuff that issues warning returns.
-} // xsystem()
 
 char
 *cfg_getparameter(const char *prn, const char *fn, const char *param)

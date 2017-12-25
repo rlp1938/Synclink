@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +44,18 @@
 #include <errno.h>
 
 #include "str.h"
+void
+writestrarray(char **list);
+
+char
+**getfile_str(const char *path);
+
+time_t
+getfile_mtime(const char *path);
+
+int
+xsystem(const char *command, int fatal);
+
 void
 dumpstrblock(const char *tmpfn, mdata *md);
 
@@ -84,9 +97,6 @@ copyfile(const char *pathfro, const char *pathto);
 
 void
 dolink(const char *fro, const char *to);
-
-void
-xsystem(const char *command, int fatal);
 
 char
 *cfg_getparameter(const char *prn, const char *fn, const char *param);
